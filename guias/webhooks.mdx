@@ -1,0 +1,121 @@
+---
+title: Webhooks outbound
+description: HMAC, envelope, payloads y retries Gallo → PSP.
+---
+
+# Webhooks outbound
+
+Gallo hace `POST` a tu URL HTTPS. Firma: HMAC-SHA256.
+
+## Headers
+
+| Header | Descripción |
+|--------|-------------|
+| `X-Gallo-Signature` | HMAC-SHA256 hex de `${timestamp}.${body}` |
+| `X-Gallo-Timestamp` | Unix segundos |
+| `X-Gallo-Event-Id` | Idempotencia receptor |
+| `X-Gallo-Event-Type` | Tipo de evento |
+
+Secret: `whsec_…`.
+
+## Envelope
+
+```json
+{
+  "eventId": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+  "type": "transfer.confirmed",
+  "version": "1",
+  "occurredAt": "2026-07-30T12:00:00.000Z",
+  "tenantId": "3f6d9c1e-8b2a-4a1f-9c3e-6b7a1d2e5f40",
+  "data": {}
+}
+```
+
+## Verificar firma (Node.js)
+
+```js
+const crypto = require('crypto');
+
+function verify(req, secret) {
+  const ts = req.headers['x-gallo-timestamp'];
+  const sig = req.headers['x-gallo-signature'];
+  const body = req.rawBody; // crudo, sin re-serializar
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(`${ts}.${body}`)
+    .digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
+}
+```
+
+Rechazá timestamps &gt; ~5 min.
+
+## Payloads
+
+### account.created
+
+```json
+{
+  "type": "account.created",
+  "data": {
+    "cvu": "0000003100000000000147",
+    "cuit": "20370994049",
+    "titular": "JUAN PEREZ",
+    "tipoPersona": "F"
+  }
+}
+```
+
+### account.credited
+
+```json
+{
+  "type": "account.credited",
+  "data": {
+    "cvu": "0000003100000000000147",
+    "importe": "2500.00",
+    "idCoelsa": "G1LMP68NKVYE3XD2R7OEV4",
+    "externalId": "aviso-credito-…"
+  }
+}
+```
+
+### transfer.confirmed
+
+```json
+{
+  "type": "transfer.confirmed",
+  "data": {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "idTrxCliente": "1024",
+    "idTrxCoelsa": "G1LMP68NKVYE3XD2R7OEV4",
+    "importe": "1500.50",
+    "status": "confirmed",
+    "estadoCodigo": "00",
+    "isInternal": false
+  }
+}
+```
+
+### transfer.failed
+
+```json
+{
+  "type": "transfer.failed",
+  "data": {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "status": "failed",
+    "errorCoelsa": "Error del banco (400): …",
+    "estadoCodigo": "41",
+    "estadoDescripcion": "ERROR"
+  }
+}
+```
+
+## Tipos
+
+`account.created` · `account.alias.updated` · `account.closed` · `account.credited` · `transfer.created` · `transfer.sent` · `transfer.confirmed` · `transfer.failed` · `transfer.reversed`
+
+## Retries
+
+Respondé **2xx** rápido. Ante fallo: backoff exponencial. Deduplicá con `X-Gallo-Event-Id`.

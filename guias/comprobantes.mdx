@@ -1,0 +1,69 @@
+---
+title: Comprobantes y ledger
+description: Proyección de movimientos a comprobantes — /v1 y /wallet/v1.
+---
+
+# Comprobantes y ledger
+
+Saldos en `ledger_accounts` + `ledger_movements`. Los comprobantes proyectan (no reescriben) el pipeline de transfers.
+
+## Endpoints /v1
+
+| Método | Path |
+|--------|------|
+| GET | `/v1/voucher-types` |
+| GET | `/v1/accounts/:cvu/comprobantes` |
+| POST | `/v1/accounts/:cvu/comprobantes` |
+| GET | `/v1/comprobantes/:id` |
+| GET | `/v1/comprobantes/by-external/:idExterno` |
+
+## curl — listar
+
+```bash
+curl "https://api.dev.gallo-pay.com/v1/accounts/0000003100000000000147/comprobantes?limit=50" \
+  -H "x-api-key: gpk_test_…"
+```
+
+## curl — ajuste custom
+
+```bash
+curl -X POST https://api.dev.gallo-pay.com/v1/accounts/0000003100000000000147/comprobantes \
+  -H "x-api-key: gpk_test_…" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "voucherTypeCode": "PROMO_REINTEGRO",
+    "amount": 150.5,
+    "idExterno": "promo-2026-08-0042",
+    "description": "Promo verano CVU"
+  }'
+```
+
+## Wallet
+
+```bash
+curl "https://api.dev.gallo-pay.com/wallet/v1/ComprobantesByFilters?page=1&pageSize=50" \
+  -H "x-api-key: gpk_test_…"
+
+curl -X POST https://api.dev.gallo-pay.com/wallet/v1/Comprobante \
+  -H "x-api-key: gpk_test_…" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "idCuenta": 123,
+    "codigo": "PROMO_REINTEGRO",
+    "importe": 150.5,
+    "idExterno": "promo-2026-08-0042",
+    "signo": 1
+  }'
+```
+
+Signo Bind: `1` crédito, `-1` débito. Extensión: `sentido` = `hold | release | confirm_hold`.
+
+## Mapping
+
+| Ledger | Código | Sentido |
+|--------|--------|---------|
+| hold / transfer | `TRANSFER_HOLD` | hold |
+| confirm_hold / transfer | `TRANSFER_CONFIRM` | debit |
+| release / transfer | `TRANSFER_RELEASE` | release |
+| credit / webhook_credit | `INBOUND_CREDIT` | credit |
+| credit / webhook_reversal | `REVERSAL` | credit |

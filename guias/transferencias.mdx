@@ -1,0 +1,78 @@
+---
+title: Transferencias
+description: Cash-out ARS, estados, P2P interno y errores Coinag.
+---
+
+# Transferencias
+
+Cash-out inmediato en ARS vía Coinag/Coelsa, con hold en ledger y webhooks por estado.
+
+## Crear
+
+```bash
+curl -X POST https://api.dev.gallo-pay.com/v1/transfers \
+  -H "x-api-key: gpk_test_…" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cvuDebito": "0000208200000000000147",
+    "cbuCredito": "0000208200000000000291",
+    "cuitCredito": "20370994049",
+    "concepto": "VAR",
+    "importe": 1500.5,
+    "descripcion": "Pago servicio"
+  }'
+```
+
+## Consultar
+
+```bash
+curl https://api.dev.gallo-pay.com/v1/transfers/<id> \
+  -H "x-api-key: gpk_test_…"
+```
+
+Listado: `GET /v1/transfers` o `GET /wallet/v1/Operaciones`.
+
+## Estados
+
+| Status | Significado |
+|--------|-------------|
+| `pending` | Aceptada; hold en ledger |
+| `sent` | Enviada a Coelsa |
+| `confirmed` | Liquidada |
+| `failed` | Rechazada; release del hold |
+
+Webhooks: `transfer.created` → `transfer.sent` → `transfer.confirmed` \| `failed`. Reversa: `transfer.reversed`.
+
+## P2P interno
+
+Si `cbuCredito` es un CVU activo del **mismo tenant**: `isInternal=true`, `status=confirmed`, `estadoCodigo=INTERNAL` (sin banco).
+
+## Errores HTTP
+
+| HTTP | Cuándo |
+|------|--------|
+| 400 | Validación / falta `Idempotency-Key` |
+| 401 | API key inválida |
+| 404 | Recurso inexistente |
+| 409 | Conflicto |
+| 422 | Negocio (p. ej. saldo insuficiente) |
+
+## Campos Coinag
+
+| Campo | Significado |
+|-------|-------------|
+| `bankStatus` | HTTP echo del banco en el envelope de error |
+| `bankBody` | ProblemDetails / body Coinag |
+| `errorCoelsa` | Mensaje legible en el recurso transfer |
+| `estadoCodigo` | Código Coelsa (`00`, `41`, …) o `INTERNAL` |
+| `estadoDescripcion` | Texto asociado |
+
+```json
+{
+  "statusCode": 422,
+  "message": "Saldo insuficiente",
+  "bankStatus": 400,
+  "bankBody": { "title": "…", "errors": {} }
+}
+```

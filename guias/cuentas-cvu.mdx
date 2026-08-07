@@ -1,0 +1,92 @@
+---
+title: Cuentas y CVU
+description: Alta de cuentas y CVU con /v1 y /wallet/v1, alias y saldos.
+---
+
+# Cuentas y CVU
+
+## Entornos
+
+| | URL | Key |
+|--|-----|-----|
+| Homolog | `https://api.dev.gallo-pay.com` | `gpk_test_…` |
+| Prod | `https://api.prod.gallo-pay.com` | `gpk_live_…` |
+
+## Dos familias
+
+| Familia | Uso |
+|---------|-----|
+| `/v1/accounts` | API nativa: CVU, alias, balance, comprobantes |
+| `/wallet/v1` | Fachada Bind: `Cuenta`, `CVU`, saldos PascalCase |
+
+Mismo tenant vía `x-api-key`. No mezcles IDs entre capas sin mapear.
+
+## Alta nativa
+
+```bash
+curl -X POST https://api.dev.gallo-pay.com/v1/accounts \
+  -H "x-api-key: gpk_test_…" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cuit": "20370994049",
+    "titular": "JUAN PEREZ",
+    "tipoPersona": "F",
+    "alias": "gallo.juan.perez",
+    "pep": false,
+    "nationality": "AR"
+  }'
+```
+
+Respuesta típica (201):
+
+```json
+{
+  "cvu": "0000003100000000000147",
+  "cuit": "20370994049",
+  "titular": "JUAN PEREZ",
+  "tipoPersona": "F",
+  "alias": "gallo.juan.perez",
+  "status": "active"
+}
+```
+
+## Wallet — Cuenta → CVU
+
+```bash
+curl -X POST https://api.dev.gallo-pay.com/wallet/v1/Cuenta \
+  -H "x-api-key: gpk_test_…" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cuitCuil": "20370994049",
+    "nombre": "Juan",
+    "apellido": "Perez",
+    "razonSocial": "Juan Perez",
+    "email": "juan@example.com",
+    "celular": "1168599999",
+    "actividadAfip": "000012",
+    "habilitado": true,
+    "esPep": false,
+    "esFatca": false,
+    "esUif": false,
+    "nacionalidad": "AR"
+  }'
+
+curl -X POST https://api.dev.gallo-pay.com/wallet/v1/CVU \
+  -H "x-api-key: gpk_test_…" \
+  -H "Content-Type: application/json" \
+  -d '{ "idCuenta": 123, "nombreCVU": "Juan Perez", "aliasAutomatico": true }'
+```
+
+## Saldos
+
+```bash
+curl https://api.dev.gallo-pay.com/v1/accounts/0000003100000000000147/balance \
+  -H "x-api-key: gpk_test_…"
+```
+
+Wallet: `SaldoActualByCVU`, `SaldoHistoricoByCVU`, `SaldosActuales`.
+
+## Eventos
+
+`account.created`, `account.alias.updated`, `account.credited`, `account.closed` — ver [Webhooks](/guias/webhooks).

@@ -1,0 +1,34 @@
+---
+title: Quick start
+description: Primera llamada autenticada a la API de Gallo Pay.
+---
+
+# Quick start
+
+## 1. Obtener una API key
+
+Escribí a [infogallopay@estudiogallo.com.ar](mailto:infogallopay@estudiogallo.com.ar) para sandbox (`gpk_test_…`) o producción (`gpk_live_…`).
+
+## 2. Health / auth
+
+```bash
+curl https://api.dev.gallo-pay.com/health
+
+curl https://api.dev.gallo-pay.com/v1/accounts?limit=1 \
+  -H "x-api-key: gpk_test_…"
+```
+
+## 3. Flujo mínimo
+
+1. Alta CVU — [Cuentas y CVU](/guias/cuentas-cvu)
+2. Configurar webhook HTTPS — [Webhooks](/guias/webhooks)
+3. Cash-out — [Transferencias](/guias/transferencias)
+4. Extracto — [Comprobantes](/guias/comprobantes)
+
+## Idempotencia
+
+```bash
+Idempotency-Key: <uuid-v4 único por operación>
+```
+
+Reintentos con la **misma** key devuelven la respuesta original sin re-ejecutar.

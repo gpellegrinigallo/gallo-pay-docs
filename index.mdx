@@ -1,0 +1,33 @@
+---
+title: Gallo Pay Docs
+description: Documentación pública para integradores PSP — CVU, transferencias, webhooks y OpenAPI.
+---
+
+# Gallo Pay
+
+APIs para crear CVUs, mover pesos (cash-in / cash-out) sobre **Coinag / Coelsa** y recibir **webhooks firmados**.
+
+## Entornos
+
+| Entorno | Base URL | API key |
+| ------- | -------- | ------- |
+| Homolog / sandbox | `https://api.dev.gallo-pay.com` | `gpk_test_…` |
+| Producción | `https://api.prod.gallo-pay.com` | `gpk_live_…` |
+
+Auth: header `x-api-key`. Escrituras críticas: `Idempotency-Key`.
+
+## Guías
+
+- [Quick start](/quickstart)
+- [Cuentas y CVU](/guias/cuentas-cvu)
+- [Transferencias](/guias/transferencias)
+- [Webhooks](/guias/webhooks)
+- [Comprobantes](/guias/comprobantes)
+
+## Referencia
+
+Tab **API Reference** (OpenAPI). Swagger live: [api.dev/docs](https://api.dev.gallo-pay.com/docs).
+
+## Ops internas
+
+Runbooks de plataforma viven en el monorepo (`docs/`), no en este sitio.

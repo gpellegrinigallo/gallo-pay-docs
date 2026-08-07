@@ -1,0 +1,63 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Gallo Pay",
+  "colors": {
+    "primary": "#0B3D2E",
+    "light": "#1A6B4F",
+    "dark": "#06261C"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guías",
+        "groups": [
+          {
+            "group": "Empezar",
+            "pages": ["index", "quickstart"]
+          },
+          {
+            "group": "Integración",
+            "pages": [
+              "guias/cuentas-cvu",
+              "guias/transferencias",
+              "guias/webhooks",
+              "guias/comprobantes"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "openapi": "openapi.json"
+      }
+    ]
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Sitio",
+        "href": "https://gallo-pay.com"
+      },
+      {
+        "label": "Homolog API",
+        "href": "https://api.dev.gallo-pay.com/docs"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "website": "https://gallo-pay.com"
+    }
+  },
+  "seo": {
+    "metatags": {
+      "canonical": "https://docs.gallo-pay.com"
+    }
+  }
+}
