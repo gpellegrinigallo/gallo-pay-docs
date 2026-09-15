@@ -9,15 +9,28 @@ Saldos en `ledger_accounts` + `ledger_movements`. Los comprobantes proyectan (no
 
 ## Endpoints /v1
 
-| Método | Path |
-|--------|------|
-| GET | `/v1/voucher-types` |
-| GET | `/v1/accounts/:cvu/comprobantes` |
-| POST | `/v1/accounts/:cvu/comprobantes` |
-| GET | `/v1/comprobantes/:id` |
-| GET | `/v1/comprobantes/by-external/:idExterno` |
+| Método | Path | Notas |
+|--------|------|-------|
+| GET | `/v1/movements` | Sync tenant-wide: `updated_since` + `cursor` (default credit+debit) |
+| GET | `/v1/voucher-types` | |
+| GET | `/v1/accounts/:cvu/comprobantes` | |
+| POST | `/v1/accounts/:cvu/comprobantes` | |
+| GET | `/v1/comprobantes/:id` | |
+| GET | `/v1/comprobantes/by-external/:idExterno` | |
 
-## curl — listar
+## Sync incremental (ledger)
+
+Para PLAFT / catch-up **no** iterés CVUs. Preferí:
+
+```bash
+curl "https://api.dev.gallo-pay.com/v1/movements?updated_since=2026-09-15T00:00:00.000Z&limit=100" \
+  -H "x-api-key: gpk_test_…"
+# → { items, nextCursor, limit }; seguir con ?cursor=
+```
+
+Outbox HMAC (eventos POSTeados): ver [Webhooks](/guias/webhooks). Comprobantes por CVU / fachada Bind siguen abajo.
+
+## curl — listar por CVU
 
 ```bash
 curl "https://api.dev.gallo-pay.com/v1/accounts/0000003100000000000147/comprobantes?limit=50" \

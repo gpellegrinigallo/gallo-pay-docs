@@ -7,7 +7,10 @@ description: Cash-out ARS, estados, P2P interno y errores Coinag.
 
 Cash-out inmediato en ARS vía Coinag/Coelsa, con hold en ledger y webhooks por estado.
 
-## Crear
+## Crear (one-shot)
+
+El PSP ejecuta el cash-out en un request. Para un LLM, usá el canal agéntico
+(`POST /v1/agentic/orders` + confirm humano); ver [Sigil](/guias/sigil).
 
 ```bash
 curl -X POST https://api.dev.gallo-pay.com/v1/transfers \
@@ -37,22 +40,37 @@ Listado: `GET /v1/transfers` o `GET /wallet/v1/Operaciones`.
 
 | Status | Significado |
 |--------|-------------|
-| `pending` | Aceptada; hold en ledger |
-| `sent` | Enviada a Coelsa |
-| `confirmed` | Liquidada |
+| `pending` | Aceptada; hold en ledger (transitorio durante el POST) |
+| `sent` | Coinag aceptó garantía; Coelsa aún no liquidó — **no es acreditación** |
+| `confirmed` | Liquidada en Coelsa |
 | `failed` | Rechazada; release del hold |
 
-Webhooks: `transfer.created` → `transfer.sent` → `transfer.confirmed` \| `failed`. Reversa: `transfer.reversed`.
+### Respuesta del POST (integradores / Sigil)
+
+`POST /v1/transfers` **espera el veredicto de Coinag/Coelsa** cuando el banco responde en la misma ventana (~15 s):
+
+| Resultado banco | HTTP | `status` en body |
+|-----------------|------|------------------|
+| Rechazo sync (p. ej. código `23`, `41`, `ERROR ACREDITACION`) | 201 | `failed` |
+| Liquidación (`ACREDITADO`) | 201 | `confirmed` |
+| Garantía aceptada pero sin acreditación aún (`00`) | 201 | `sent` |
+| Timeout Coinag | 201 | `sent` |
+
+**No trates `201` + `sent` como “plata en destino”.** Liquidación = `status=confirmed` o webhook `transfer.confirmed`. Rechazo = `status=failed` + `errorCoelsa` / `estadoCodigo`.
+
+Si Coelsa rechaza de forma síncrona, **no** se emite `transfer.sent`; solo `transfer.created` y `transfer.failed`.
+
+Webhooks habituales: `transfer.created` → (`transfer.sent` si queda intermedia) → `transfer.confirmed` \| `transfer.failed`. Reversa: `transfer.reversed`.
 
 ## P2P interno
 
-Si `cbuCredito` es un CVU activo del **mismo tenant**: `isInternal=true`, `status=confirmed`, `estadoCodigo=INTERNAL` (sin banco).
+Si `cbuCredito` es un CVU activo del **mismo tenant**: `isInternal=true`, `status=confirmed`, `estadoCodigo=INTERNAL` (sin banco). Webhooks: `transfer.created` + `transfer.confirmed` (no hay `transfer.sent`) y `account.credited` al destino, con los mismos campos de originante que un cash-in (`importe`, `cvuDebito`, `cuitDebito`, `titularDebito`). El poll `GET /v1/webhook-events` lista el mismo `account.credited` del outbox HMAC (no un aviso Coinag).
 
 ## Errores HTTP
 
 | HTTP | Cuándo |
 |------|--------|
-| 400 | Validación / falta `Idempotency-Key` |
+| 400 | Validación / falta `Idempotency-Key` / `cbuCredito` mal formulado (dígito verificador BCRA) |
 | 401 | API key inválida |
 | 404 | Recurso inexistente |
 | 409 | Conflicto |

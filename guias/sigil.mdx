@@ -1,0 +1,171 @@
+---
+title: Conector Sigil
+description: Cómo apuntar Sigil a Gallo Pay — auth, IDs, fechas, sync y cash-out.
+---
+
+# Conector Sigil (nativo Gallo)
+
+Gallo Pay **no habla Mangoo**. Un solo host, API key, `comitente` = CVU. Inventario y estado por endpoint: `INTEGRACION-MANGOO-GALLO-PAY.md` en el repo.
+
+## Hosts
+
+| Ambiente | Base |
+|----------|------|
+| Homolog | `https://api.dev.gallo-pay.com` |
+| Prod | `https://api.prod.gallo-pay.com` |
+
+Header: `x-api-key: gpk_test_…` o `gpk_live_…`. No hay `/ws/Login` ni `X-Connector-Auth`.
+
+## Una familia de IDs
+
+| Concepto Sigil / Mangoo | Gallo |
+|-------------------------|-------|
+| `Comitente` | CVU 22 dígitos |
+| `idBind` | `id` de `GET /wallet/v1/Cuenta` |
+| CUIT | `cuit` / `cuitCuil` (11 dígitos, sin guiones) |
+
+No mezcles el UUID nativo `accounts.id` con el `id` wallet.
+
+## Fechas
+
+Queries Gallo: **`yyyy-MM-dd`**. No `dd/MM/yyyy`.
+
+## Paginación
+
+| Recurso | Params | Tope |
+|---------|--------|------|
+| Saldos | `pageNumber` / `pageSize` | **1000** (`GET /wallet/v1/SaldosActuales`) |
+| Comprobantes / movimientos / operaciones wallet | `pageNumber` / `pageSize` | **100** |
+| `/v1/accounts`, `/v1/transfers` | `limit` / `offset` | **100** |
+| `/v1/webhook-events`, `/v1/movements` | `limit` + **`cursor`** (keyset) | **100** |
+
+Paginar hasta `totalPages` / `nextCursor`. No mandar `pageSize=1000000`.
+
+## Rate limit
+
+**120 req / 60s por API key** (no por IP). Respuesta **429** con `Retry-After`. La key de sync Sigil (`human`) puede tener override ops a **600/min** (`api_keys.throttleLimit`). La key `agent` se queda en 120.
+
+## Sync P0
+
+Webhook HMAC = fuente de verdad. Poll incremental &lt;1 min (no barrer CVUs):
+
+```bash
+# Cuentas
+curl "https://api.dev.gallo-pay.com/v1/accounts?limit=100&offset=0" \
+  -H "x-api-key: gpk_test_…"
+
+# CUIT
+curl "https://api.dev.gallo-pay.com/wallet/v1/CuentaByCuit?cuit=20370994049" \
+  -H "x-api-key: gpk_test_…"
+
+# Outbox HMAC (mismo envelope que el POST)
+curl "https://api.dev.gallo-pay.com/v1/webhook-events?limit=100" \
+  -H "x-api-key: gpk_test_…"
+# → seguir con ?cursor=<nextCursor>
+
+# Ledger tenant-wide (default credit+debit; watermark createdAt)
+curl "https://api.dev.gallo-pay.com/v1/movements?updated_since=2026-09-15T00:00:00.000Z&limit=100" \
+  -H "x-api-key: gpk_test_…"
+
+# Saldos
+curl "https://api.dev.gallo-pay.com/wallet/v1/SaldosActuales?pageNumber=1&pageSize=1000" \
+  -H "x-api-key: gpk_test_…"
+```
+
+**Dedupe:** outbox `account.credited` y fila ledger del cash-in coexisten — mergeá por `idCoelsa` (como hoy). No son dos eventos de outbox.
+
+**Breaking (live 2026-09-15):** avisos Coinag ya no viven en `/v1/webhook-events` (ahora es el outbox). Inbound banco: `GET /v1/bank/inbound-events`. Ver [Webhooks](/guias/webhooks).
+
+**Handoff:** `sync-gallo-eventos` debe usar estos dos GET + cursor; si no, el timeout ~150s / 429 sigue.
+## Operar
+
+Alta con ficha KYC: `POST /wallet/v1/Cuenta` y después `POST /wallet/v1/CVU`. Alta mínima: `POST /v1/accounts` + `Idempotency-Key`.
+
+Freeze: `POST /v1/accounts/{cvu}/suspend` / `reactivate`.
+
+Cash-out one-shot:
+
+```bash
+curl -X POST https://api.dev.gallo-pay.com/v1/transfers \
+  -H "x-api-key: gpk_test_…" \
+  -H "Idempotency-Key: Sigil-<timestamp-o-uuid>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cvuDebito": "0000003100000000000147",
+    "cbuCredito": "0000208200000000000291",
+    "cuitCredito": "20370994049",
+    "concepto": "VAR",
+    "importe": 1500.5
+  }'
+```
+
+### Veredicto en el POST (no confundir con “enviada”)
+
+El body del `201` puede traer ya el estado terminal:
+
+- **`confirmed`** — Coelsa acreditó; podés marcar la operación como liquidada.
+- **`failed`** — Rechazo de Coelsa (`estadoCodigo`, `errorCoelsa`); el hold se libera. No hubo `transfer.sent`.
+- **`sent`** — Coinag aceptó garantía pero Coelsa no liquidó aún. **No** es acreditación al beneficiario. Suscribí webhooks `transfer.confirmed` y `transfer.failed`, o poll `GET /v1/transfers/{id}`.
+
+Detalle completo: [Transferencias — estados](/guias/transferencias#estados).
+
+Cash-out **agéntico** (el modelo propone; un humano confirma en Sigil):
+
+**No** uses el Copiloto de `admin.dev.gallo-pay.com` ni `POST /v1/agents/chat`. Riel Sigil: `/v1/agentic/chat` + confirm de órdenes. Doc único: `SIGIL-CHAT-AGENTICO.md`.
+
+Usá **dos keys**. La del chat (`capability=agent`) no puede `POST /v1/transfers` ni confirm.
+
+```bash
+# 1) Worker LLM — key agent
+curl -X POST https://api.dev.gallo-pay.com/v1/agentic/chat \
+  -H "x-api-key: gpk_test_…agent" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Mandale 50k a Guido",
+    "cvuDebito": "0000003100000000000147",
+    "directory": [
+      { "name": "Guido Pellegrini", "cbu": "0000208200000000000291", "cuit": "20370994049" }
+    ]
+  }'
+
+# 2) UI: mostrar `order` del response o GET /v1/agentic/orders/{id} (key human)
+# 3) Humano confirma (key human, nunca agent):
+curl -X POST https://api.dev.gallo-pay.com/v1/agentic/orders/{id}/confirm \
+  -H "x-api-key: gpk_test_…human" \
+  -H "Content-Type: application/json" \
+  -d '{"payloadHash":"<hash del GET>","confirmedBy":"trader@sigil"}'
+```
+
+`cvuDebito` es la CVU de la ficha abierta (inmutable). La respuesta incluye `facts` (saldo/límites) y `order.kind` (`transfer`, freeze, DEBIN, QR). Homolog: `AGENTS_MONEY_ORDERS_ENABLED`. Key agent: perfil Agent (`debin.view`, sin writes).
+
+Mapear `referencia` de Sigil a `Idempotency-Key`. El mismo valor no cobra dos veces.
+
+Lookup Coelsa: `GET /v1/transfers/by-coelsa/{idCoelsa}` — **404 = no hay** (dato, no falla de integración).
+
+## QR iniciador (lector común)
+
+Sigil **no** llama resolve IEP ni parsea CIMPRA. Flujo:
+
+1. Escanear EMV → `POST /v1/qr/preview` (`debin.view`)
+2. UI con `collector` / monto (`open_amount` vs `closed_amount`)
+3. `POST /v1/qr/pay` con `qr` + comprador (+ `importe` si monto abierto). Si faltan `vendedor*`, Gallo auto-resuelve.
+
+Solo `TRANSFER`. Detalle: `docs/ops/handoff-sigil-qr-iep.md`. Guía PSP: [Pago QR](/guias/pago-qr).
+
+## Promociones QR (cashback)
+
+Reintegro **async** al CVU comprador tras un QR billetera finalizado. El importe Coelsa no cambia.
+
+- Cupón en pago: `promoCode` opcional en `POST /v1/qr/pay`
+- Preview: `GET /v1/promos/preview?cvu=…&amount=…&promoCode=…`
+- Campañas: `GET/POST/PATCH /v1/promos` (permisos `promos.read` / `promos.manage` en key **human**, no agent)
+- Webhooks: `promo.applied`, `promo.skipped`, `promo.reversed` (mismo HMAC outbound)
+
+Guía completa: [Promociones QR](https://gallo-pay.com/developers/guias/promociones). Handoff Sigil (repo interno): `docs/ops/handoff-sigil-promociones.md`.
+
+## No llamar
+
+- `/ws/*` EGWS, login user/passwd, boletos, cauciones, FCI, managers.
+- `IngresoComprobante` para pegar un cash-in de banco: el crédito ya entra por Coinag.
+- Favoritos y “extracción total a CVU ALyC”: guardar destinos en Sigil; tesorería Gallo usa sweep, no un CVU ALyC.
+- `POST /v1/agents/chat` (Copiloto ops Gallo) y comprobantes internos de ajuste.

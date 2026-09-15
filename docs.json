@@ -23,7 +23,8 @@
               "guias/cuentas-cvu",
               "guias/transferencias",
               "guias/webhooks",
-              "guias/comprobantes"
+              "guias/comprobantes",
+              "guias/sigil"
             ]
           }
         ]

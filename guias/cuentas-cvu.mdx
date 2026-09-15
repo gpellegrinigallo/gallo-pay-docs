@@ -87,6 +87,30 @@ curl https://api.dev.gallo-pay.com/v1/accounts/0000003100000000000147/balance \
 
 Wallet: `SaldoActualByCVU`, `SaldoHistoricoByCVU`, `SaldosActuales`.
 
+## Modo sweep (CVU primera recaudadora)
+
+Opt-in por PSP (admin). El cash-in a CVUs de usuario se barre a una **CVU tesorería**.
+La otra app ve el **saldo de cliente** (lo que pasó por esa CVU), no el ledger de la CVU (≈0).
+
+En `GET /v1/accounts` y `GET /v1/accounts/:cvu`, la CVU de tesorería viene con `isTreasury: true`.
+El balance de esa CVU también expone `isTreasury` (y `freeBalance` cuando el sweep está activo).
+
+| Endpoint | Uso |
+|----------|-----|
+| `GET /v1/treasury` | Snapshot: pasivo clientes, `freeBalance` (informativo) |
+| `GET /v1/treasury/positions/:cvu` | Saldo de cliente |
+| `GET /v1/treasury/positions/:cvu/movements` | Movimientos del libro cliente |
+| `GET /wallet/v1/Tesoreria` / `SaldoClienteByCVU/:cvu` | Fachada wallet |
+
+Cash-out: `POST /v1/transfers` con `cvuDebito` = CVU del usuario. Tesorería puede
+entrar/salir por su propia CVU sin afectar saldos mostrados a clientes.
+
+Comprobantes manuales sobre CVU usuario también barren a tesorería (misma regla que
+un cash-in). Si hay saldos atrapados en ledger de usuario: reconciliar desde el
+panel del PSP o `POST /v1/psps/:id/treasury/reconcile-sweep`.
+
 ## Eventos
 
 `account.created`, `account.alias.updated`, `account.credited`, `account.closed` — ver [Webhooks](/guias/webhooks).
+
+En modo sweep, `account.credited` incluye `swept` y `treasuryCvu`; un solo evento por cash-in (no hay crédito extra por el P2P de barrido).

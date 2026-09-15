@@ -1,11 +1,13 @@
 ---
 title: Webhooks outbound
-description: HMAC, envelope, payloads y retries Gallo → PSP.
+description: HMAC, envelope, payloads, retries, poll outbox y replay Gallo → PSP.
 ---
 
 # Webhooks outbound
 
 Gallo hace `POST` a tu URL HTTPS. Firma: HMAC-SHA256.
+
+**Fuente de verdad:** el POST. **Red de seguridad:** `GET /v1/webhook-events` (mismo envelope) + `GET /v1/movements` (ledger). No iterés CVUs.
 
 ## Headers
 
@@ -23,13 +25,23 @@ Secret: `whsec_…`.
 ```json
 {
   "eventId": "d290f1ee-6c54-4b01-90e6-d701748f0851",
-  "type": "transfer.confirmed",
+  "type": "account.credited",
   "version": "1",
   "occurredAt": "2026-07-30T12:00:00.000Z",
   "tenantId": "3f6d9c1e-8b2a-4a1f-9c3e-6b7a1d2e5f40",
-  "data": {}
+  "data": {
+    "cvu": "0000003100000000000147",
+    "importe": "2500.00",
+    "idCoelsa": "G1LMP68NKVYE3XD2R7OEV4",
+    "externalId": "aviso-credito-…",
+    "cvuDebito": "0000208200000000000291",
+    "cuitDebito": "20370994049",
+    "titularDebito": "JUAN PEREZ"
+  }
 }
 ```
+
+Cash-in es **un solo** evento: `account.credited` con payload completo. No hay ping vacío + segundo mensaje.
 
 ## Verificar firma (Node.js)
 
@@ -50,6 +62,44 @@ function verify(req, secret) {
 
 Rechazá timestamps &gt; ~5 min.
 
+## Poll / catch-up (outbox)
+
+```bash
+curl "https://api.dev.gallo-pay.com/v1/webhook-events?limit=100" \
+  -H "x-api-key: gpk_test_…"
+
+# siguiente página
+curl "https://api.dev.gallo-pay.com/v1/webhook-events?cursor=<nextCursor>&limit=100" \
+  -H "x-api-key: gpk_test_…"
+```
+
+Respuesta: `{ items, nextCursor, limit }`. Cada ítem = mismo envelope del POST + `deliveryStatus` / `attempts` / `lastError`.
+
+- Lista **todos** los tipos que Gallo POSTea (`account.*`, `transfer.*`, `debin.*`, `qr.*`, `promo.*`, …).
+- `updated_since` (ISO) filtra por `occurredAt`.
+- `GET /v1/webhook-events/:id` — un evento.
+- `POST /v1/webhook-events/:id/replay` — reencola (mismo `eventId`; no resetea `attempts`; bypasea el tope de reintentos automáticos).
+
+### Breaking (live 2026-09-15)
+
+Antes, `GET /v1/webhook-events` listaba avisos inbound de Coinag. Eso se movió a **`GET /v1/bank/inbound-events`**. Pedidos legacy (`type=aviso_credito_cvu`, `/summary`) responden **410** con `movedTo`.
+
+```bash
+curl "https://api.dev.gallo-pay.com/v1/bank/inbound-events?limit=50" \
+  -H "x-api-key: gpk_test_…"
+```
+
+Summary ops: `GET /v1/bank/inbound-events/summary`.
+
+## Dedupe con el ledger
+
+Un cash-in aparece como:
+
+1. `account.credited` en el outbox / POST, y
+2. una fila `credit` en `GET /v1/movements`
+
+**No** son dos eventos de outbox. Mergeá por `idCoelsa` (cash-in) o `eventId` / `transferId` (resto).
+
 ## Payloads
 
 ### account.created
@@ -68,6 +118,8 @@ Rechazá timestamps &gt; ~5 min.
 
 ### account.credited
 
+Cash-in (riel `AvisoCreditoCVU`):
+
 ```json
 {
   "type": "account.credited",
@@ -75,10 +127,34 @@ Rechazá timestamps &gt; ~5 min.
     "cvu": "0000003100000000000147",
     "importe": "2500.00",
     "idCoelsa": "G1LMP68NKVYE3XD2R7OEV4",
-    "externalId": "aviso-credito-…"
+    "externalId": "aviso-credito-…",
+    "cvuDebito": "0000208200000000000291",
+    "cuitDebito": "20370994049",
+    "titularDebito": "JUAN PEREZ"
   }
 }
 ```
+
+P2P interno (CVU→CVU del mismo PSP, sin banco). Mismos campos de originante; no hay `idCoelsa`:
+
+```json
+{
+  "type": "account.credited",
+  "data": {
+    "cvu": "0000003100000000000291",
+    "importe": "1500.50",
+    "cvuDebito": "0000003100000000000147",
+    "cuitDebito": "27338687813",
+    "titularDebito": "SABRINA LOPES",
+    "transferId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "idTrxCliente": "1024",
+    "source": "internal_p2p",
+    "isInternal": true
+  }
+}
+```
+
+En sweep usuario→usuario, `source` es `internal_p2p_sweep`. El débito también emite `transfer.created` y `transfer.confirmed` (`isInternal: true`, sin `transfer.sent`).
 
 ### transfer.confirmed
 
@@ -114,8 +190,8 @@ Rechazá timestamps &gt; ~5 min.
 
 ## Tipos
 
-`account.created` · `account.alias.updated` · `account.closed` · `account.credited` · `transfer.created` · `transfer.sent` · `transfer.confirmed` · `transfer.failed` · `transfer.reversed`
+`account.created` · `account.alias.updated` · `account.closed` · `account.credited` · `transfer.created` · `transfer.sent` · `transfer.confirmed` · `transfer.failed` · `transfer.reversed` · `debin.*` · `qr.*` · `promo.*` · `agentic.order.pending_confirm` · `agentic.order.settled` · `agentic.order.failed`
 
 ## Retries
 
-Respondé **2xx** rápido. Ante fallo: backoff exponencial. Deduplicá con `X-Gallo-Event-Id`.
+Respondé **2xx** rápido. Ante fallo: **8 intentos**, backoff 30s → 2h. El body se reconstruye desde el outbox (mismo `eventId`). Deduplicá con `X-Gallo-Event-Id`.
